@@ -1,0 +1,17 @@
+{
+  "name": "Recepty",
+  "short_name": "Recepty",
+  "description": "Moje recepty, jídelníček a nákupní seznam",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#F3F5EF",
+  "theme_color": "#2E6B3E",
+  "lang": "cs",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}
