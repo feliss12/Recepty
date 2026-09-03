@@ -14,6 +14,7 @@ API klíč do repozitáře nikdy nepatří – zadává se až v aplikaci v Nast
 - Klíč: aistudio.google.com → Get API key (bezplatný tarif, bez karty).
 - V Nastavení klepni na „Ověřit klíč a načíst modely“ a vyber Flash model – ten čte fotky i text a stačí na něj bezplatný tarif.
 - Nový recept: vyfoť stránku z knížky (jde vybrat víc fotek najednou), aplikace ji přepíše do polí. Obrázek hotového jídla vkládáš ručně.
+- Ingredience lze dělit do skupin: řádek zakončený dvojtečkou („Na těsto:“) zahájí novou skupinu.
 
 ## Aktualizace aplikace
 Po změně `index.html` zvedni `VERSION` v `sw.js` (např. `recepty-v2`), aby si tablet stáhl novou verzi.

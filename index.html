@@ -97,6 +97,8 @@ label small{font-weight:400;color:var(--muted)}
 .servings{display:flex;align-items:center;gap:.5rem;margin-bottom:1rem}
 .servings button{width:46px;height:46px;border-radius:12px;background:var(--green-soft);color:var(--green-deep);font-weight:700;font-size:1.3rem}
 .servings .n{min-width:3ch;text-align:center;font-weight:700;font-size:1.2rem}
+.ing-group{font-family:var(--font-display);font-weight:700;font-size:1.02rem;color:var(--green-deep);margin:1.1rem 0 .2rem;padding-bottom:.25rem;border-bottom:2px solid var(--green-soft)}
+.panel .ing-group:first-of-type{margin-top:0}
 .ing{list-style:none;margin:0;padding:0}
 .ing li{display:flex;gap:.75rem;padding:.55rem 0;border-bottom:1px solid var(--line);align-items:baseline}
 .ing li:last-child{border-bottom:0}
@@ -204,8 +206,7 @@ const ALL_TAGS = [...TAGS_TYPE, ...TAGS_KITCHEN];
 const UNITS = ['g','kg','ml','l','dl','ks','lžíce','lžička','lžic','lžiček','hrnek','hrnky','šálek','špetka','balení','plátek','plátky','stroužek','stroužky','svazek','sáček','konzerva','kostka'];
 const DAYS = ['pondělí','úterý','středa','čtvrtek','pátek','sobota','neděle'];
 const DEFAULTS = {
-  apiKey:'', textModel:'gemini-2.5-flash',
-  rohlik:'https://www.rohlik.cz/hledat?search={q}'
+  apiKey:'', textModel:'gemini-3.6-flash'
 };
 
 /* ---------------- úložiště ---------------- */
@@ -239,7 +240,11 @@ const DB = {
   clear(store){ return this.tx(store,'readwrite',s=>s.clear()); }
 };
 const settings = {
-  get(){ try{ return Object.assign({},DEFAULTS,JSON.parse(localStorage.getItem('settings')||'{}')); }catch{ return {...DEFAULTS}; } },
+  get(){ try{
+      const o = Object.assign({},DEFAULTS,JSON.parse(localStorage.getItem('settings')||'{}'));
+      if(o.textModel==='gemini-2.5-flash') o.textModel = DEFAULTS.textModel; // starý výchozí model Google zrušil
+      return o;
+    }catch{ return {...DEFAULTS}; } },
   set(obj){ localStorage.setItem('settings',JSON.stringify(Object.assign(this.get(),obj))); }
 };
 const uid = ()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
@@ -268,11 +273,13 @@ function parseAmount(str){
 }
 function fmtAmount(n){
   if(n==null||isNaN(n)) return '';
-  const near = [[0.25,'¼'],[0.33,'⅓'],[0.5,'½'],[0.66,'⅔'],[0.75,'¾']];
-  const whole = Math.floor(n), rest = n-whole;
-  for(const [v,s] of near){ if(Math.abs(rest-v)<0.04) return (whole?whole:'')+s; }
-  if(rest<0.04) return String(whole);
-  return String(Math.round(n*10)/10).replace('.',',');
+  if(n>=20) return String(Math.round(n));            // gramy, mililitry – zlomky nedávají smysl
+  if(n>=10) return String(Math.round(n*2)/2).replace('.',',');
+  const q = Math.round(n*4)/4;                        // menší množství zaokrouhlíme na čtvrtiny
+  const whole = Math.floor(q), rest = q-whole;
+  const near = [[0.25,'¼'],[0.5,'½'],[0.75,'¾']];
+  for(const [v,sym] of near){ if(Math.abs(rest-v)<0.01) return (whole?whole:'')+sym; }
+  return String(whole||q).replace('.',',');
 }
 // "200 g hladké mouky" -> {amount:200, unit:'g', name:'hladké mouky', raw}
 function parseIngredientLine(line){
@@ -284,6 +291,37 @@ function parseIngredientLine(line){
   const um = rest.match(/^([^\s]+)\s+(.+)$/);
   if(um && UNITS.includes(um[1].toLowerCase())){ unit=um[1]; name=um[2]; }
   return {amount, unit, name, raw};
+}
+// Řádek zakončený dvojtečkou ("Na těsto:") zahajuje novou skupinu ingrediencí.
+function parseIngredientBlock(text){
+  const out=[]; let group='';
+  for(const line of String(text||'').split('\n')){
+    const t=line.trim(); if(!t) continue;
+    if(/:$/.test(t) && !/\d/.test(t.slice(0,2))){ group=t.replace(/:$/,'').trim(); continue; }
+    const ing=parseIngredientLine(t); if(!ing) continue;
+    if(group) ing.group=group;
+    out.push(ing);
+  }
+  return out;
+}
+function ingredientsToText(list){
+  let group='', out=[];
+  for(const i of (list||[])){
+    const g=i.group||'';
+    if(g!==group){ if(g) out.push((out.length?'\n':'')+g+':'); group=g; }
+    out.push(i.raw);
+  }
+  return out.join('\n');
+}
+// [{group:'Na těsto', items:[…]}, …]
+function groupIngredients(list){
+  const groups=[];
+  for(const i of (list||[])){
+    const g=i.group||'';
+    if(!groups.length || groups[groups.length-1].group!==g) groups.push({group:g, items:[]});
+    groups[groups.length-1].items.push(i);
+  }
+  return groups;
 }
 function ingredientText(i, factor=1){
   const a = i.amount!=null ? fmtAmount(i.amount*factor) : '';
@@ -305,35 +343,68 @@ async function fileToDataUrl(file, max=1000){
 }
 
 /* ---------------- Gemini ---------------- */
+// Doporučené modely – seznam z API nemusí nové modely obsahovat, proto je nabízíme i takto.
+const KNOWN_MODELS = ['gemini-3.6-flash','gemini-3.5-flash-lite','gemini-3.5-flash','gemini-3.1-flash-lite','gemini-2.5-flash','gemini-2.5-flash-lite'];
 const Gemini = {
-  url(model,method='generateContent'){ const s=settings.get(); return `https://generativelanguage.googleapis.com/v1beta/models/${model}:${method}?key=${encodeURIComponent(s.apiKey)}`; },
   check(){ if(!settings.get().apiKey) throw new Error('Nejdřív vlož API klíč v Nastavení.'); },
-  async call(model, body){
-    this.check();
-    const r = await fetch(this.url(model),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  async post(url, body){
+    const s=settings.get();
+    const r = await fetch(url,{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':s.apiKey},body:JSON.stringify(body)});
     if(!r.ok){
-      let msg = 'HTTP '+r.status;
-      try{ const j=await r.json(); msg = j.error?.message || msg; }catch{}
-      if(r.status===429) msg='Překročen limit požadavků. Zkus to za chvíli.';
-      throw new Error(msg);
+      let msg='HTTP '+r.status;
+      try{ const j=await r.json(); msg=j.error?.message||msg; }catch{}
+      const e=new Error(msg); e.status=r.status; throw e;
     }
     return r.json();
   },
+  hint(err){
+    const m=err.message||'';
+    if(/no longer available|not found|not supported/i.test(m)) return new Error(m+' — vyber v Nastavení jiný model.');
+    if(err.status===429) return new Error(m+' (limit požadavků – zkus to za chvíli nebo vyber jiný model.)');
+    return err;
+  },
+  parts(url){ const [meta,data]=url.split(','); return {mime:meta.match(/data:(.*?);/)[1], data}; },
+  // Nové rozhraní (Interactions API) s automatickým návratem ke staršímu generateContent.
   async json(prompt, images=[]){
-    const s=settings.get();
-    const parts = images.map(u=>{ const [meta,data]=u.split(','); return {inlineData:{mimeType:meta.match(/data:(.*?);/)[1], data}}; });
-    parts.push({text:prompt});
-    const d = await this.call(s.textModel,{contents:[{parts}],generationConfig:{responseMimeType:'application/json',temperature:0.4}});
-    const text = (d.candidates?.[0]?.content?.parts||[]).map(p=>p.text||'').join('');
-    return JSON.parse(text.replace(/```json|```/g,'').trim());
+    this.check();
+    const s=settings.get(); const model=s.textModel;
+    let text=null, firstErr=null;
+    try{
+      const input=[{type:'text',text:prompt}];
+      for(const u of images){ const p=this.parts(u); input.push({type:'image', mime_type:p.mime, data:p.data}); }
+      const d = await this.post('https://generativelanguage.googleapis.com/v1beta/interactions',{model,input});
+      text = this.readInteraction(d);
+    }catch(err){
+      firstErr = err;
+      if(!(err.status===404 || err.status===400)) throw this.hint(err);
+    }
+    if(text===null){
+      try{
+        const parts = images.map(u=>{ const p=this.parts(u); return {inlineData:{mimeType:p.mime, data:p.data}}; });
+        parts.push({text:prompt});
+        const d = await this.post(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,{contents:[{parts}],generationConfig:{responseMimeType:'application/json'}});
+        text = (d.candidates?.[0]?.content?.parts||[]).map(x=>x.text||'').join('');
+      }catch(err){ throw this.hint(firstErr && firstErr.status!==404 ? firstErr : err); }
+    }
+    const clean = String(text||'').replace(/```json|```/g,'').trim();
+    const m = clean.match(/[{[][\s\S]*[}\]]/);
+    if(!m) throw new Error('Model nevrátil použitelnou odpověď. Zkus to znovu nebo vyber jiný model.');
+    return JSON.parse(m[0]);
+  },
+  readInteraction(d){
+    const out=[];
+    for(const o of (d.outputs||[])) if(o.type==='text'&&o.text) out.push(o.text);
+    for(const st of (d.steps||[])) for(const c of (st.content||[])) if(c.type==='text'&&c.text) out.push(c.text);
+    return out.join('\n');
   },
   async models(){
     this.check();
     const s=settings.get();
-    const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(s.apiKey)}&pageSize=200`);
+    const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?pageSize=200`,{headers:{'x-goog-api-key':s.apiKey}});
     if(!r.ok) throw new Error('Klíč nefunguje (HTTP '+r.status+').');
     const j = await r.json();
-    return (j.models||[]).filter(m=>(m.supportedGenerationMethods||[]).includes('generateContent')).map(m=>m.name.replace('models/',''));
+    const listed = (j.models||[]).map(m=>m.name.replace('models/','')).filter(n=>!/embedding|aqa|tts|veo|imagen/i.test(n));
+    return [...new Set([...KNOWN_MODELS, ...listed])];
   }
 };
 
@@ -395,7 +466,8 @@ function detailBody(r, cook){
       <div class="panel">
         <h3>Ingredience</h3>
         <div class="servings"><button data-s="-1" aria-label="Méně porcí">−</button><span class="n">${cur}</span><span>${nameForm(cur)}</span><button data-s="1" aria-label="Více porcí">+</button></div>
-        <ul class="ing">${r.ingredients.map(i=>{ const t=ingredientText(i,factor); return `<li><span class="amt">${esc(t.amt)}</span><span>${esc(t.name)}</span></li>`; }).join('')}</ul>
+        ${groupIngredients(r.ingredients).map(g=>`${g.group?`<div class="ing-group">${esc(g.group)}</div>`:''}
+          <ul class="ing">${g.items.map(i=>{ const t=ingredientText(i,factor); return `<li><span class="amt">${esc(t.amt)}</span><span>${esc(t.name)}</span></li>`; }).join('')}</ul>`).join('')}
       </div>
       <div class="panel">
         <h3>Postup</h3>
@@ -468,7 +540,8 @@ function viewForm(app,id){
       </div>
       <label for="servings">Počet porcí</label><input type="number" id="servings" min="1" value="${r.servings||4}" style="max-width:140px">
       <label for="ing">Ingredience <small>– každá na vlastní řádek, např. „200 g hladké mouky“</small></label>
-      <textarea id="ing" rows="8">${esc(r.ingredients.map(i=>i.raw).join('\n'))}</textarea>
+      <div class="hint" style="margin-bottom:.4rem">Skupinu vytvoříš řádkem zakončeným dvojtečkou, např. „Na těsto:“ – vše pod ním k ní patří, dokud nenapíšeš další.</div>
+      <textarea id="ing" rows="10">${esc(ingredientsToText(r.ingredients))}</textarea>
       <label for="steps">Postup <small>– každý krok na vlastní řádek</small></label>
       <textarea id="steps" rows="8">${esc(r.steps.join('\n'))}</textarea>
       <label>Štítky</label>
@@ -489,13 +562,14 @@ function viewForm(app,id){
   const collect = ()=>{
     r.name = $('#name').value.trim();
     r.servings = Math.max(1, parseInt($('#servings').value)||1);
-    r.ingredients = $('#ing').value.split('\n').map(parseIngredientLine).filter(Boolean);
+    r.ingredients = parseIngredientBlock($('#ing').value);
     r.steps = $('#steps').value.split('\n').map(s=>s.trim().replace(/^\d+[.)]\s*/,'')).filter(Boolean);
     r.tags = $$('.tagpick .chip.on').map(c=>c.dataset.tag);
     r.note = $('#note').value.trim(); r.source=$('#source').value.trim(); r.image=image;
   };
   const PARSE_PROMPT = `Přepiš recept do JSON. Vrať přesně tuto strukturu bez komentářů:
 {"name":"název","servings":číslo,"ingredients":["řádek ve tvaru množství jednotka název, např. 200 g hladké mouky"],"steps":["krok 1","krok 2"],"tags":["štítky pouze z tohoto seznamu: ${ALL_TAGS.join(', ')}"]}
+Pokud recept dělí suroviny do skupin (těsto, náplň, drobenka, poleva, marináda…), vlož do pole ingredients před každou skupinu samostatný řádek s jejím názvem a dvojtečkou na konci, např. "Na těsto:". Když recept skupiny nemá, žádné nevymýšlej.
 Text přepiš věrně, nic nevymýšlej. Pokud je recept na více fotkách, spoj je v pořadí. Je-li na fotce více receptů, přepiš jen ten první.`;
   const fill = j=>{
     $('#name').value=j.name||''; $('#servings').value=j.servings||4;
@@ -585,13 +659,12 @@ function viewShop(app){
     cur.uses.add(r.name); items.set(key,cur);
   } }
   const list=[...items.values()].sort((a,b)=>a.name.localeCompare(b.name,'cs'));
-  const s=settings.get();
   const line = it=>[it.hasAmount?fmtAmount(it.amount):'',it.unit,it.name].filter(Boolean).join(' ');
   app.innerHTML = `
     <div class="page-head"><div><h1>Nákup</h1><div class="sub">${p?`z jídelníčku od ${fmtDate(p.weekStart)} · ${used.length} jídel`:'žádný jídelníček'}</div></div>
       ${list.length?`<button class="btn" id="copy">Zkopírovat seznam</button>`:''}</div>
-    ${list.length?`<ul class="shop">${list.map((it,i)=>`<li data-i="${i}"><input type="checkbox" id="c${i}"><label for="c${i}" class="t" style="margin:0;font-weight:500">${esc(it.name)}<div class="shop-uses">${esc([...it.uses].join(', '))}</div></label><span class="amt">${esc([it.hasAmount?fmtAmount(it.amount):'',it.unit].filter(Boolean).join(' '))}</span>${s.rohlik?`<a href="${s.rohlik.replace('{q}',encodeURIComponent(it.name))}" target="_blank" rel="noopener">Rohlík</a>`:''}</li>`).join('')}</ul>
-    <p class="hint" style="margin-top:1rem">Seznam se skládá z jídelníčku, který máš zrovna otevřený. Zkopírovaný text vlož do ChatGPT s Rohlíkem nebo do poznámek.</p>`
+    ${list.length?`<ul class="shop">${list.map((it,i)=>`<li data-i="${i}"><input type="checkbox" id="c${i}"><label for="c${i}" class="t" style="margin:0;font-weight:500">${esc(it.name)}<div class="shop-uses">${esc([...it.uses].join(', '))}</div></label><span class="amt">${esc([it.hasAmount?fmtAmount(it.amount):'',it.unit].filter(Boolean).join(' '))}</span></li>`).join('')}</ul>
+    <p class="hint" style="margin-top:1rem">Seznam se skládá z jídelníčku, který máš zrovna otevřený.</p>`
     :`<div class="empty"><h3>Prázdný seznam</h3>Nejdřív sestav jídelníček. <a href="#/jidelnicek">Jídelníček</a></div>`}`;
   $$('.shop li input').forEach(c=>c.addEventListener('change',()=>c.closest('li').classList.toggle('done',c.checked)));
   $('#copy')?.addEventListener('click',async()=>{
@@ -615,12 +688,7 @@ function viewSettings(app){
       <label for="tm">Model <small>(přepis receptů z fotky, jídelníček)</small></label>
       <input type="text" id="tm" list="models" value="${esc(s.textModel)}">
       <datalist id="models"></datalist>
-      <p class="hint" style="margin-top:.75rem">Stačí bezplatný tarif. Vyber Flash model – umí číst fotky i text.</p>
-    </div>
-    <div class="set-block">
-      <h3>Rohlík</h3>
-      <label for="ro">Odkaz na vyhledávání <small>– {q} nahradí název ingredience, nech prázdné pro vypnutí</small></label>
-      <input type="text" id="ro" value="${esc(s.rohlik)}">
+      <p class="hint" style="margin-top:.75rem">Vyber Flash nebo Flash-Lite model – umí číst fotky i text a bývají v bezplatném tarifu. V nabídce jsou i modely, které seznam z Googlu nevrací; pokud u některého přijde chyba, zkus jiný.</p>
     </div>
     <div class="btn-row"><button class="btn" id="save">Uložit nastavení</button></div>
     <div class="set-block" style="margin-top:1.5rem">
@@ -631,11 +699,11 @@ function viewSettings(app){
       <div class="btn-row"><button class="btn secondary" id="exp">Stáhnout zálohu (JSON)</button><label class="btn ghost" for="impf" style="margin:0">Obnovit ze zálohy</label><input type="file" id="impf" accept="application/json" class="hidden"></div>
       <p class="hint" style="margin-top:.75rem">Obnova přidá recepty ze zálohy k těm stávajícím; stejné recepty (podle id) přepíše.</p>
     </div>`;
-  $('#save').addEventListener('click',()=>{ settings.set({apiKey:$('#key').value.trim(), textModel:$('#tm').value.trim(), rohlik:$('#ro').value.trim()}); toast('Nastavení uloženo'); });
+  $('#save').addEventListener('click',()=>{ settings.set({apiKey:$('#key').value.trim(), textModel:$('#tm').value.trim()}); toast('Nastavení uloženo'); });
   $('#test').addEventListener('click',async e=>{
     settings.set({apiKey:$('#key').value.trim()});
     busy(e.target,true,'Ověřuji…'); const st=$('#st');
-    try{ const m=await Gemini.models(); $('#models').innerHTML=m.map(x=>`<option value="${esc(x)}">`).join(''); st.className='status ok'; st.textContent=`Klíč funguje. Dostupných modelů: ${m.length}. Klepni do pole modelu a vyber ze seznamu.`; }
+    try{ const m=await Gemini.models(); $('#models').innerHTML=m.map(x=>`<option value="${esc(x)}">`).join(''); st.className='status ok'; st.textContent=`Klíč funguje. Klepni do pole Model a vyber ze seznamu (${m.length} položek).`; }
     catch(err){ st.className='status err'; st.textContent=err.message; }
     busy(e.target,false);
   });
