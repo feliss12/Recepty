@@ -1,5 +1,5 @@
 // Offline cache – při každé změně aplikace zvedni číslo verze.
-const VERSION = 'recepty-v4';
+const VERSION = 'recepty-v5';
 const CORE = ['./', './index.html', './manifest.json', './icon.svg', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
