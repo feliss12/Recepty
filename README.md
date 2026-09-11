@@ -15,6 +15,8 @@ API klíč do repozitáře nikdy nepatří – zadává se až v aplikaci v Nast
 - V Nastavení klepni na „Ověřit klíč a načíst modely“ a vyber Flash model – ten čte fotky i text a stačí na něj bezplatný tarif.
 - Nový recept: vyfoť stránku z knížky (jde vybrat víc fotek najednou), aplikace ji přepíše do polí. Obrázek hotového jídla vkládáš ručně.
 - Ingredience lze dělit do skupin: řádek zakončený dvojtečkou („Na těsto:“) zahájí novou skupinu.
+- V detailu receptu displej nezhasíná (Wake Lock) a tlačítko „Exportovat do PDF“ otevře dialog tisku – tam vyber „Uložit jako PDF“.
+- Jídelníček se sestavuje jen z receptů se štítkem „hlavní jídlo“; ručně lze u dne zvolit jakýkoli recept.
 
 ## Aktualizace aplikace
 Po změně `index.html` zvedni `VERSION` v `sw.js` (např. `recepty-v2`), aby si tablet stáhl novou verzi.
