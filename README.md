@@ -14,6 +14,9 @@ zadává v Nastavení a ukládá se jen v tom zařízení.
 - Klíč: aistudio.google.com → Get API key.
 - V Nastavení klepni na „Ověřit klíč a načíst modely“ a vyber Flash nebo
   Flash-Lite model – ty umí číst fotky i text.
+- Google modely čas od času ruší. Když se to stane, aplikace si přečte
+  z chybové hlášky, čím ho nahradit, sama se přepne a požadavek zopakuje;
+  v Nastavení pak uvidíš nový model.
 - Bezplatný tarif má nízké limity (u některých modelů jednotky požadavků za
   minutu a desítky za den). Při chybě 429 počkej chvíli, nebo zapni v AI Studiu
   platby – u tohoto používání jde o haléře za recept.
@@ -38,7 +41,7 @@ zadává v Nastavení a ukládá se jen v tom zařízení.
   zařízení, zálohu si dělej pravidelně.
 
 ## Aktualizace
-Po úpravě `index.html` zvedni `VERSION` v `sw.js` (teď `recepty-v11`).
+Po úpravě `index.html` zvedni `VERSION` v `sw.js` (teď `recepty-v12`).
 Zařízení si novou verzi stáhnou při druhém spuštění.
 
 ## Poznámka ke kaloriím a ceně

@@ -207,7 +207,7 @@ const ALL_TAGS = [...TAGS_TYPE, ...TAGS_KITCHEN];
 const UNITS = ['g','kg','ml','l','dl','ks','lžíce','lžička','lžic','lžiček','hrnek','hrnky','šálek','špetka','balení','plátek','plátky','stroužek','stroužky','svazek','sáček','konzerva','kostka'];
 const DAYS = ['pondělí','úterý','středa','čtvrtek','pátek','sobota','neděle'];
 const DEFAULTS = {
-  apiKey:'', textModel:'gemini-3.6-flash',
+  apiKey:'', textModel:'gemini-3.8-flash',
   planServings: 2,
   staples: 'sůl, soli, pepř, pepře, olej, oleje, voda, vody, ocet, octa'
 };
@@ -244,7 +244,10 @@ const DB = {
 };
 const settings = {
   get(){ try{
-      return Object.assign({},DEFAULTS,JSON.parse(localStorage.getItem('settings')||'{}'));
+      const o = Object.assign({},DEFAULTS,JSON.parse(localStorage.getItem('settings')||'{}'));
+      // Modely řady 2.x Google zrušil – uložená volba by jinak appku blokovala.
+      if(/^gemini-2\./.test(o.textModel||'')) o.textModel = DEFAULTS.textModel;
+      return o;
     }catch{ return {...DEFAULTS}; } },
   set(obj){ localStorage.setItem('settings',JSON.stringify(Object.assign(this.get(),obj))); }
 };
@@ -384,7 +387,7 @@ async function fileToDataUrl(file, max=1000, quality=0.82){
 
 /* ---------------- Gemini ---------------- */
 // Doporučené modely – seznam z API nemusí nové modely obsahovat, proto je nabízíme i takto.
-const KNOWN_MODELS = ['gemini-3.6-flash','gemini-3.5-flash-lite','gemini-3.5-flash','gemini-3.1-flash-lite','gemini-2.5-flash','gemini-2.5-flash-lite'];
+const KNOWN_MODELS = ['gemini-3.8-flash','gemini-3.6-flash','gemini-3.5-flash','gemini-3.5-flash-lite','gemini-3.1-flash-lite'];
 const Gemini = {
   check(){ if(!settings.get().apiKey) throw new Error('Nejdřív vlož API klíč v Nastavení.'); },
   async post(url, body, timeout=120000){
@@ -412,8 +415,27 @@ const Gemini = {
     return err;
   },
   parts(url){ const [meta,data]=url.split(','); return {mime:meta.match(/data:(.*?);/)[1], data}; },
-  // Nové rozhraní (Interactions API) s automatickým návratem ke staršímu generateContent.
+  /**
+   * Když Google model zruší, v chybě rovnou napíše, čím ho nahradit
+   * („Please update your code to use models/…“). Přepneme se na něj a
+   * zkusíme to ještě jednou, ať se appka nezasekne na zastaralém nastavení.
+   */
   async json(prompt, images=[]){
+    try{
+      return await this.jsonRaw(prompt, images);
+    }catch(err){
+      const m = (err.message||'').match(/use\s+models\/([A-Za-z0-9._-]+)/);
+      const nahrada = m && m[1];
+      if(nahrada && nahrada !== settings.get().textModel){
+        settings.set({textModel:nahrada});
+        toast('Model byl zrušen, přepínám na '+nahrada);
+        return await this.jsonRaw(prompt, images);
+      }
+      throw err;
+    }
+  },
+  // Nové rozhraní (Interactions API) s automatickým návratem ke staršímu generateContent.
+  async jsonRaw(prompt, images=[]){
     this.check();
     const s=settings.get(); const model=s.textModel;
     let text=null, firstErr=null;
