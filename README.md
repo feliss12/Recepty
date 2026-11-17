@@ -1,25 +1,47 @@
-# Recepty – kuchyňská aplikace
+# Recepty
 
-Jeden statický web bez serveru. Data (recepty, jídelníčky, API klíč) zůstávají jen v prohlížeči tabletu.
+Aplikace pro tablet a mobil: recepty, týdenní jídelníček a nákupní seznam.
+Běží jako statická stránka, data zůstávají v prohlížeči daného zařízení.
+Přepis receptů z fotky a sestavení jídelníčku zajišťuje Gemini – API klíč se
+zadává v Nastavení a ukládá se jen v tom zařízení.
 
-## Zprovoznění zdarma (GitHub Pages)
-1. Vytvoř nový veřejný nebo soukromý repozitář na GitHubu a nahraj do něj všechny soubory z této složky.
-2. Settings → Pages → Source: „Deploy from a branch“, branch `main`, složka `/ (root)`.
-3. Za minutu běží na `https://<uzivatel>.github.io/<repozitar>/`.
-4. Na tabletu otevři adresu v Chromu → menu → „Přidat na plochu“ (Android) / Sdílet → „Přidat na plochu“ (iPad).
-
-API klíč do repozitáře nikdy nepatří – zadává se až v aplikaci v Nastavení.
+## Nasazení na GitHub Pages
+1. Nahraj všechny soubory z této složky do repozitáře.
+2. Settings → Pages → Deploy from a branch, branch `main`, složka `/ (root)`.
+3. Na tabletu i telefonu otevři adresu a dej „Přidat na plochu“.
 
 ## Gemini
-- Klíč: aistudio.google.com → Get API key (bezplatný tarif, bez karty).
-- V Nastavení klepni na „Ověřit klíč a načíst modely“ a vyber Flash model – ten čte fotky i text a stačí na něj bezplatný tarif.
-- Nový recept: vyfoť stránku z knížky (jde vybrat víc fotek najednou), aplikace ji přepíše do polí. Obrázek hotového jídla vkládáš ručně.
-- Ingredience lze dělit do skupin: řádek zakončený dvojtečkou („Na těsto:“) zahájí novou skupinu.
-- V detailu receptu displej nezhasíná (Wake Lock) a tlačítko „Exportovat do PDF“ otevře dialog tisku – tam vyber „Uložit jako PDF“.
-- Jídelníček se sestavuje jen z receptů se štítkem „hlavní jídlo“; ručně lze u dne zvolit jakýkoli recept.
+- Klíč: aistudio.google.com → Get API key.
+- V Nastavení klepni na „Ověřit klíč a načíst modely“ a vyber Flash nebo
+  Flash-Lite model – ty umí číst fotky i text.
+- Bezplatný tarif má nízké limity (u některých modelů jednotky požadavků za
+  minutu a desítky za den). Při chybě 429 počkej chvíli, nebo zapni v AI Studiu
+  platby – u tohoto používání jde o haléře za recept.
 
-## Aktualizace aplikace
-Po změně `index.html` zvedni `VERSION` v `sw.js` (např. `recepty-v2`), aby si tablet stáhl novou verzi.
+## Práce s aplikací
+- **Nový recept** z fotky stránky v knížce (i víc stránek najednou) nebo
+  z vloženého textu. Obrázek hotového jídla se vkládá ručně.
+- **Doba přípravy, kalorie a cena na porci** se při přepisu předvyplní – čas
+  se opíše z receptu, pokud je uvedený, kalorie a cenu Gemini odhadne
+  z ingrediencí. Všechno jde ručně přepsat přes „Upravit“.
+  U dříve uložených receptů je v detailu tlačítko **„Dopočítat čas, kalorie
+  a cenu“**; objeví se, dokud některý z údajů chybí.
+- **Skupiny ingrediencí**: řádek zakončený dvojtečkou („Na těsto:“) zahájí
+  novou skupinu.
+- **Jídelníček** se sestavuje z receptů se štítkem „hlavní jídlo“; u každého
+  dne se nastavuje počet porcí.
+- **Nákupní seznam** sčítá suroviny přes jednotky (0,5 kg + 500 g = 1 kg),
+  vynechává běžné zásoby ze seznamu „Co nekupuji“ v Nastavení a odškrtnuté
+  položky řadí na konec.
+- **Export do PDF** v detailu receptu – v dialogu tisku vyber „Uložit jako PDF“.
+- **Záloha**: Nastavení → „Stáhnout zálohu (JSON)“. Recepty žijí jen v daném
+  zařízení, zálohu si dělej pravidelně.
 
-## Záloha
-Nastavení → „Stáhnout zálohu (JSON)“. Obnova tamtéž. Dělej ji občas – data žijí jen v tabletu.
+## Aktualizace
+Po úpravě `index.html` zvedni `VERSION` v `sw.js` (teď `recepty-v11`).
+Zařízení si novou verzi stáhnou při druhém spuštění.
+
+## Poznámka ke kaloriím a ceně
+Obojí je odhad jazykového modelu z ingrediencí, ne výpočet z nutriční databáze
+ani z aktuálních cen v obchodech. Ber to jako orientační údaj a kde na tom
+záleží, oprav si ho ručně.

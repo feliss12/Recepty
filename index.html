@@ -80,6 +80,8 @@ label small{font-weight:400;color:var(--muted)}
 .card .body{padding:.85rem 1rem 1rem}
 .card .title{font-family:var(--font-display);font-size:1.2rem;font-weight:700;line-height:1.2}
 .card .tags{color:var(--muted);font-size:.88rem;margin-top:.35rem}
+.card .meta-line{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.45rem}
+.card .meta-line span{background:var(--green-soft);color:var(--green-deep);border-radius:999px;padding:.15rem .55rem;font-size:.8rem;font-weight:700}
 
 .empty{background:var(--card);border-radius:var(--radius);padding:2.5rem 1.5rem;text-align:center;color:var(--muted)}
 .empty h3{color:var(--ink);margin-bottom:.5rem}
@@ -90,6 +92,10 @@ label small{font-weight:400;color:var(--muted)}
 .hero .ph{font-family:var(--font-display);font-size:5rem;color:var(--green);opacity:.5;padding:3rem}
 .detail-head{margin:1.25rem 0 .5rem}
 .detail-head .meta{color:var(--muted);margin-top:.35rem}
+.facts{display:flex;flex-wrap:wrap;gap:.6rem;margin:.9rem 0 .25rem}
+.fact{background:var(--card);border-radius:12px;padding:.55rem .9rem;min-width:7rem}
+.fact .lbl{display:block;color:var(--muted);font-size:.8rem}
+.fact .val{font-family:var(--font-display);font-weight:700;font-size:1.15rem}
 .cols{display:grid;grid-template-columns:1fr;gap:1.5rem;margin-top:1.25rem}
 @media(min-width:820px){.cols{grid-template-columns:minmax(260px,1fr) 2fr}}
 .panel{background:var(--card);border-radius:var(--radius);padding:1.25rem}
@@ -113,6 +119,9 @@ label small{font-weight:400;color:var(--muted)}
 .note{background:var(--mustard-soft);border-radius:12px;padding:.8rem 1rem;margin-top:1rem}
 
 /* form */
+.fields{display:grid;grid-template-columns:repeat(2,1fr);gap:0 1rem}
+@media(min-width:640px){.fields{grid-template-columns:repeat(4,1fr)}}
+.fields label{margin-top:1.1rem}
 .form .ai-box{background:var(--green-soft);border-radius:var(--radius);padding:1rem 1.25rem;margin-bottom:.5rem}
 .form .ai-box textarea{margin-top:.5rem}
 .form .ai-box .btn.secondary{background:#fff}
@@ -137,6 +146,9 @@ label small{font-weight:400;color:var(--muted)}
 .day .pick .thumb img{width:100%;height:100%;object-fit:cover}
 .day select{min-height:46px}
 .day a.open{font-size:.92rem}
+.day .dserv{display:flex;align-items:center;gap:.45rem;font-size:.95rem;color:var(--muted)}
+.day .dserv button{width:38px;height:38px;border-radius:10px;background:var(--green-soft);color:var(--green-deep);font-weight:700;font-size:1.15rem;flex:none}
+.day .dserv .n{font-weight:700;color:var(--ink);min-width:2ch;text-align:center}
 .history{margin-top:2rem}
 .history .item{display:flex;justify-content:space-between;align-items:center;background:var(--card);border-radius:12px;padding:.75rem 1rem;margin-bottom:.5rem;gap:1rem}
 
@@ -189,13 +201,15 @@ label small{font-weight:400;color:var(--muted)}
 
 <script>
 /* ---------------- konstanty ---------------- */
-const TAGS_TYPE = ['hlavní jídlo','sladké jídlo','dezert','bezmasé','salát','chléb a pečivo','polévka','těstoviny','rizoto','omáčky a dipy','přílohy','párty jídla','ostatní'];
+const TAGS_TYPE = ['hlavní jídlo','sladké jídlo','dezert','bezmasé','salát','chléb a pečivo','polévka','těstoviny','rizoto','omáčky a dipy','pomazánky','gril','přílohy','párty jídla','ostatní'];
 const TAGS_KITCHEN = ['česká','italská','asijská','indická','mexická','řecká','středomořská'];
 const ALL_TAGS = [...TAGS_TYPE, ...TAGS_KITCHEN];
 const UNITS = ['g','kg','ml','l','dl','ks','lžíce','lžička','lžic','lžiček','hrnek','hrnky','šálek','špetka','balení','plátek','plátky','stroužek','stroužky','svazek','sáček','konzerva','kostka'];
 const DAYS = ['pondělí','úterý','středa','čtvrtek','pátek','sobota','neděle'];
 const DEFAULTS = {
-  apiKey:'', textModel:'gemini-3.6-flash'
+  apiKey:'', textModel:'gemini-3.6-flash',
+  planServings: 2,
+  staples: 'sůl, soli, pepř, pepře, olej, oleje, voda, vody, ocet, octa'
 };
 
 /* ---------------- úložiště ---------------- */
@@ -230,9 +244,7 @@ const DB = {
 };
 const settings = {
   get(){ try{
-      const o = Object.assign({},DEFAULTS,JSON.parse(localStorage.getItem('settings')||'{}'));
-      if(o.textModel==='gemini-2.5-flash') o.textModel = DEFAULTS.textModel; // starý výchozí model Google zrušil
-      return o;
+      return Object.assign({},DEFAULTS,JSON.parse(localStorage.getItem('settings')||'{}'));
     }catch{ return {...DEFAULTS}; } },
   set(obj){ localStorage.setItem('settings',JSON.stringify(Object.assign(this.get(),obj))); }
 };
@@ -316,10 +328,49 @@ function ingredientText(i, factor=1){
   const a = i.amount!=null ? fmtAmount(i.amount*factor) : '';
   return {amt:[a,i.unit].filter(Boolean).join(' '), name:i.name||i.raw};
 }
+// Porovnávání názvů surovin bez ohledu na diakritiku a interpunkci.
+function normName(x){
+  return String(x||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .replace(/[^a-z0-9 ]/g,' ').replace(/\s+/g,' ').trim();
+}
+// Převod na základní jednotku, aby se 0,5 kg a 300 g daly sečíst.
+const UNIT_BASE = {g:['g',1], kg:['g',1000], dkg:['g',10], ml:['ml',1], dl:['ml',100], l:['ml',1000]};
+function toBase(amount, unit){
+  const m = UNIT_BASE[(unit||'').toLowerCase()];
+  if(m && amount!=null) return {unit:m[0], amount:amount*m[1]};
+  return {unit:(unit||'').toLowerCase(), amount};
+}
+function fromBase(amount, unit){
+  if(unit==='g' && amount>=1000) return {amount:amount/1000, unit:'kg'};
+  if(unit==='ml' && amount>=1000) return {amount:amount/1000, unit:'l'};
+  return {amount, unit};
+}
+// Suroviny, které mám vždy doma – do seznamu se nepíšou.
+function stapleList(){
+  return settings.get().staples.split(',').map(x=>normName(x)).filter(x=>x.length>=3);
+}
+function isStaple(name, staples){
+  const words = normName(name).split(' ');
+  return words.some(w => staples.some(st => w===st || w.startsWith(st) || st.startsWith(w) && w.length>=3));
+}
 function mondayOf(d){ const x=new Date(d); const day=(x.getDay()+6)%7; x.setDate(x.getDate()-day); x.setHours(0,0,0,0); return x; }
 const iso = d=>d.toISOString().slice(0,10);
 const fmtDate = s=>{ const d=new Date(s); return d.getDate()+'. '+(d.getMonth()+1)+'.'; };
 function nameForm(n){ return n===1?'porce':(n>=2&&n<=4?'porce':'porcí'); }
+// 95 -> "1 h 35 min"
+function fmtTime(min){
+  const m = Math.round(Number(min)||0);
+  if(!m) return '';
+  if(m < 60) return m+' min';
+  const h = Math.floor(m/60), z = m%60;
+  return z ? `${h} h ${z} min` : `${h} h`;
+}
+const fmtKcal  = v => (Number(v)>0 ? Math.round(Number(v))+' kcal' : '');
+const fmtPrice = v => (Number(v)>0 ? Math.round(Number(v))+' Kč'   : '');
+// Údaje, které se zobrazují u receptu – vždy na jednu porci.
+function recipeMeta(r){
+  return [fmtTime(r.time), fmtKcal(r.kcal), fmtPrice(r.price)].filter(Boolean);
+}
 
 async function fileToDataUrl(file, max=1000, quality=0.82){
   const url = URL.createObjectURL(file);
@@ -405,9 +456,37 @@ const Gemini = {
   }
 };
 
+/* ---------------- zadání pro Gemini ---------------- */
+// Společný popis tří odhadovaných údajů, ať je ve všech dotazech stejný.
+const ODHADY_POPIS =
+`"time": doba přípravy v minutách jako celé číslo. Pokud je v receptu uvedená, opiš ji; jinak ji odhadni.
+"kcal": odhad energie na JEDNU porci v kilokaloriích, celé číslo.
+"price": odhad ceny JEDNÉ porce v českých korunách podle běžných cen v českých obchodech, celé číslo.
+Odhady dělej i tehdy, když v receptu uvedené nejsou. Když opravdu nejde odhadnout, dej null.`;
+
+const PARSE_PROMPT = `Přepiš recept do JSON. Vrať přesně tuto strukturu bez komentářů:
+{"name":"název","servings":číslo,"time":číslo,"kcal":číslo,"price":číslo,"ingredients":["řádek ve tvaru množství jednotka název, např. 200 g hladké mouky"],"steps":["krok 1","krok 2"],"tags":["štítky pouze z tohoto seznamu: ${ALL_TAGS.join(', ')}"]}
+${ODHADY_POPIS}
+Pokud recept dělí suroviny do skupin (těsto, náplň, drobenka, poleva, marináda…), vlož do pole ingredients před každou skupinu samostatný řádek s jejím názvem a dvojtečkou na konci, např. "Na těsto:". Když recept skupiny nemá, žádné nevymýšlej.
+Text přepiš věrně, nic nevymýšlej. Pokud je recept na více fotkách, spoj je v pořadí. Je-li na fotce více receptů, přepiš jen ten první.`;
+
+// Dopočet údajů u receptu, který je už uložený.
+function odhadniUdaje(r){
+  const suroviny = r.ingredients.map(i=>i.raw).join('\n');
+  return Gemini.json(`Z tohoto receptu odhadni tři údaje. Vrať pouze JSON {"time":číslo,"kcal":číslo,"price":číslo}.
+${ODHADY_POPIS}
+
+Název: ${r.name}
+Počet porcí: ${r.servings||4}
+Ingredience:
+${suroviny}
+Postup:
+${r.steps.join('\n')}`);
+}
+
 /* ---------------- stav + routování ---------------- */
 let recipes=[], plans=[];
-const state = { q:'', tags:new Set(), doneSteps:new Set(), servings:null, wakeLock:null };
+const state = { q:'', tags:new Set(), doneSteps:new Set(), servings:null, wakeLock:null, shopDone:new Set() };
 
 async function reload(){ recipes = (await DB.all('recipes')).sort((a,b)=>a.name.localeCompare(b.name,'cs')); plans = (await DB.all('plans')).sort((a,b)=>b.weekStart.localeCompare(a.weekStart)); }
 
@@ -425,9 +504,10 @@ window.addEventListener('hashchange',route);
 /* ---------------- knihovna ---------------- */
 function recipeCard(r){
   const tags = r.tags.join(', ');
+  const meta = recipeMeta(r);
   return `<button class="card" onclick="location.hash='#/recept/${r.id}'">
     <div class="img">${r.image?`<img src="${r.image}" alt="">`:`<span class="ph">${esc(r.name[0]||'?')}</span>`}</div>
-    <div class="body"><div class="title">${esc(r.name)}</div>${tags?`<div class="tags">${esc(tags)}</div>`:''}</div>
+    <div class="body"><div class="title">${esc(r.name)}</div>${tags?`<div class="tags">${esc(tags)}</div>`:''}${meta.length?`<div class="meta-line">${meta.map(x=>`<span>${esc(x)}</span>`).join('')}</div>`:''}</div>
   </button>`;
 }
 function viewLibrary(app){
@@ -484,15 +564,33 @@ async function viewDetail(app,id){
     app.innerHTML = `
       <div class="hero">${r.image?`<img src="${r.image}" alt="">`:`<span class="ph">${esc(r.name[0]||'?')}</span>`}</div>
       <div class="detail-head"><h1>${esc(r.name)}</h1><div class="meta">${esc(r.tags.join(', '))}${r.source?` · ${esc(r.source)}`:''}</div></div>
+      ${recipeMeta(r).length?`<div class="facts">
+        ${fmtTime(r.time)?`<div class="fact"><span class="lbl">Příprava</span><span class="val">${esc(fmtTime(r.time))}</span></div>`:''}
+        ${fmtKcal(r.kcal)?`<div class="fact"><span class="lbl">Na porci</span><span class="val">${esc(fmtKcal(r.kcal))}</span></div>`:''}
+        ${fmtPrice(r.price)?`<div class="fact"><span class="lbl">Cena porce</span><span class="val">${esc(fmtPrice(r.price))}</span></div>`:''}
+      </div>`:''}
       <div class="btn-row">
         <a class="btn" href="#/upravit/${r.id}">Upravit</a>
         <button class="btn secondary" id="pdf">Exportovat do PDF</button>
+        ${recipeMeta(r).length<3?`<button class="btn secondary" id="odhad">Dopočítat čas, kalorie a cenu</button>`:''}
         <button class="btn danger" id="del">Smazat</button>
       </div>
       ${detailBody(r)}`;
     bindDetail(r, render);
     $('#del').addEventListener('click',async()=>{ if(!confirm(`Smazat „${r.name}“?`)) return; await DB.del('recipes',r.id); await reload(); toast('Recept smazán'); location.hash='#/recepty'; });
     $('#pdf').addEventListener('click',()=>printRecipe(r));
+    $('#odhad')?.addEventListener('click',async e=>{
+      busy(e.target,true,'Počítám…');
+      try{
+        const j = await odhadniUdaje(r);
+        const cislo = v => { const n=Math.round(Number(v)); return isFinite(n)&&n>0 ? n : null; };
+        r.time = cislo(j.time); r.kcal = cislo(j.kcal); r.price = cislo(j.price);
+        r.updated = Date.now();
+        await DB.put('recipes',r); await reload();
+        toast('Hotovo – údaje můžeš upravit přes Upravit');
+        render();
+      }catch(err){ busy(e.target,false); toast(err.message); }
+    });
   };
   render();
   requestWake();
@@ -519,7 +617,7 @@ function printRecipe(r){
     </style></head><body>
     ${r.image?`<img src="${r.image}" alt="">`:''}
     <h1>${esc(r.name)}</h1>
-    <div class="meta">${esc(r.tags.join(', '))}${r.source?` · ${esc(r.source)}`:''} · ${cur} ${nameForm(cur)}</div>
+    <div class="meta">${esc(r.tags.join(', '))}${r.source?` · ${esc(r.source)}`:''} · ${cur} ${nameForm(cur)}${recipeMeta(r).length?' · '+esc(recipeMeta(r).join(' · ')):''}</div>
     <h2>Ingredience</h2>${ings}
     <h2>Postup</h2><ol>${r.steps.map(x=>`<li>${esc(x)}</li>`).join('')}</ol>
     ${r.note?`<div class="note">${esc(r.note)}</div>`:''}
@@ -545,7 +643,7 @@ document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==
 /* ---------------- formulář ---------------- */
 function viewForm(app,id){
   const editing = id ? recipes.find(x=>x.id===id) : null;
-  const r = editing ? JSON.parse(JSON.stringify(editing)) : {id:uid(), name:'', image:null, servings:4, ingredients:[], steps:[], tags:[], note:'', source:''};
+  const r = editing ? JSON.parse(JSON.stringify(editing)) : {id:uid(), name:'', image:null, servings:4, time:null, kcal:null, price:null, ingredients:[], steps:[], tags:[], note:'', source:''};
   let image = r.image;
   app.innerHTML = `
     <div class="page-head"><h1>${editing?'Upravit recept':'Nový recept'}</h1></div>
@@ -565,7 +663,13 @@ function viewForm(app,id){
           <button class="btn ghost small ${image?'':'hidden'}" id="rmimg">Odebrat</button>
         </div>
       </div>
-      <label for="servings">Počet porcí</label><input type="number" id="servings" min="1" value="${r.servings||4}" style="max-width:140px">
+      <div class="fields">
+        <div><label for="servings">Počet porcí</label><input type="number" id="servings" min="1" value="${r.servings||4}"></div>
+        <div><label for="time">Příprava <small>(min)</small></label><input type="number" id="time" min="0" value="${r.time||''}" placeholder="např. 45"></div>
+        <div><label for="kcal">Kalorie <small>(na porci)</small></label><input type="number" id="kcal" min="0" value="${r.kcal||''}" placeholder="např. 520"></div>
+        <div><label for="price">Cena <small>(Kč/porce)</small></label><input type="number" id="price" min="0" value="${r.price||''}" placeholder="např. 45"></div>
+      </div>
+      <p class="hint" style="margin-top:.4rem">Kalorie i cenu odhaduje AI z ingrediencí, takže ber jako orientační – klidně je přepiš.</p>
       <label for="ing">Ingredience <small>– každá na vlastní řádek, např. „200 g hladké mouky“</small></label>
       <div class="hint" style="margin-bottom:.4rem">Skupinu vytvoříš řádkem zakončeným dvojtečkou, např. „Na těsto:“ – vše pod ním k ní patří, dokud nenapíšeš další.</div>
       <textarea id="ing" rows="10">${esc(ingredientsToText(r.ingredients))}</textarea>
@@ -589,15 +693,13 @@ function viewForm(app,id){
   const collect = ()=>{
     r.name = $('#name').value.trim();
     r.servings = Math.max(1, parseInt($('#servings').value)||1);
+    const cislo = el => { const n=parseInt($(el).value); return isFinite(n)&&n>0 ? n : null; };
+    r.time = cislo('#time'); r.kcal = cislo('#kcal'); r.price = cislo('#price');
     r.ingredients = parseIngredientBlock($('#ing').value);
     r.steps = $('#steps').value.split('\n').map(s=>s.trim().replace(/^\d+[.)]\s*/,'')).filter(Boolean);
     r.tags = $$('.tagpick .chip.on').map(c=>c.dataset.tag);
     r.note = $('#note').value.trim(); r.source=$('#source').value.trim(); r.image=image;
   };
-  const PARSE_PROMPT = `Přepiš recept do JSON. Vrať přesně tuto strukturu bez komentářů:
-{"name":"název","servings":číslo,"ingredients":["řádek ve tvaru množství jednotka název, např. 200 g hladké mouky"],"steps":["krok 1","krok 2"],"tags":["štítky pouze z tohoto seznamu: ${ALL_TAGS.join(', ')}"]}
-Pokud recept dělí suroviny do skupin (těsto, náplň, drobenka, poleva, marináda…), vlož do pole ingredients před každou skupinu samostatný řádek s jejím názvem a dvojtečkou na konci, např. "Na těsto:". Když recept skupiny nemá, žádné nevymýšlej.
-Text přepiš věrně, nic nevymýšlej. Pokud je recept na více fotkách, spoj je v pořadí. Je-li na fotce více receptů, přepiš jen ten první.`;
   const showError = msg=>{
     const box=$('#aierr'); if(!box){ toast(msg); return; }
     box.innerHTML = `<strong>Přepis se nepovedl.</strong><div style="margin-top:.3rem">${esc(msg)}</div>`;
@@ -606,6 +708,8 @@ Text přepiš věrně, nic nevymýšlej. Pokud je recept na více fotkách, spoj
   const fill = j=>{
     $('#aierr')?.classList.add('hidden');
     $('#name').value=j.name||''; $('#servings').value=j.servings||4;
+    const vloz = (el,v)=>{ const n=Math.round(Number(v)); $(el).value = isFinite(n)&&n>0 ? n : ''; };
+    vloz('#time', j.time); vloz('#kcal', j.kcal); vloz('#price', j.price);
     $('#ing').value=(j.ingredients||[]).join('\n'); $('#steps').value=(j.steps||[]).join('\n');
     $$('.tagpick .chip').forEach(c=>c.classList.toggle('on',(j.tags||[]).includes(c.dataset.tag)));
     toast('Přepsáno, zkontroluj pole'); $('#name').scrollIntoView({behavior:'smooth',block:'start'});
@@ -636,7 +740,8 @@ Text přepiš věrně, nic nevymýšlej. Pokud je recept na více fotkách, spoj
 
 /* ---------------- jídelníček ---------------- */
 let planDraft=null;
-function newDraft(monday){ return {id:uid(), weekStart:iso(monday), days:DAYS.map((_,i)=>{ const d=new Date(monday); d.setDate(d.getDate()+i); return {date:iso(d), recipeId:null}; }), created:Date.now()}; }
+function newDraft(monday){ const def=settings.get().planServings||2; return {id:uid(), weekStart:iso(monday), days:DAYS.map((_,i)=>{ const d=new Date(monday); d.setDate(d.getDate()+i); return {date:iso(d), recipeId:null, servings:def}; }), created:Date.now()}; }
+const dayServings = d => d.servings || settings.get().planServings || 2;
 function viewPlan(app){
   if(!planDraft){ const thisMon=mondayOf(new Date()); planDraft = plans.find(p=>p.weekStart===iso(thisMon)) ? JSON.parse(JSON.stringify(plans.find(p=>p.weekStart===iso(thisMon)))) : newDraft(thisMon); }
   const p=planDraft;
@@ -651,24 +756,36 @@ function viewPlan(app){
     <div class="panel" style="margin-bottom:1rem">
       <label for="wish" style="margin-top:0">Přání pro tento týden <small>– nepovinné</small></label>
       <input type="text" id="wish" placeholder="např. 2× bezmasé, v pátek něco rychlého, žádnou italskou">
-      <div class="hint" style="margin-top:.5rem">Vybírá se jen z hlavních jídel (${mains.length}). Ručně můžeš u kteréhokoli dne zvolit i jiný recept.</div>
+      <div class="hint" style="margin-top:.5rem">Vybírá se jen z hlavních jídel (${mains.length}). Ručně můžeš u kteréhokoli dne zvolit i jiný recept. Počet porcí u každého dne uprav tlačítky − a +; nákupní seznam se podle toho přepočítá.</div>
       <div class="btn-row"><button class="btn" id="ai">Sestavit z mých receptů</button><button class="btn secondary" id="rnd">Náhodně</button></div>
     </div>`}
     <div class="week">${p.days.map((d,i)=>{ const r=recipes.find(x=>x.id===d.recipeId); return `<div class="day">
       <div class="dname">${DAYS[i]}<small>${fmtDate(d.date)}</small></div>
       <div class="pick"><div class="thumb">${r?.image?`<img src="${r.image}" alt="">`:''}</div><select data-i="${i}">${opts(d.recipeId)}</select></div>
-      ${r?`<a class="open" href="#/recept/${r.id}">Otevřít recept</a>`:''}
+      ${r?`<div class="dserv"><button data-day="${i}" data-ds="-1" aria-label="Méně porcí">−</button><span class="n">${dayServings(d)}</span><span>${nameForm(dayServings(d))}</span><button data-day="${i}" data-ds="1" aria-label="Více porcí">+</button></div>
+      <a class="open" href="#/recept/${r.id}">Otevřít recept</a>`:''}
     </div>`; }).join('')}</div>
     <div class="btn-row"><button class="btn" id="saveplan">Uložit jídelníček</button><a class="btn ghost" href="#/nakup">Nákupní seznam</a></div>
     ${plans.length?`<div class="history"><h3>Uložené týdny</h3>${plans.map(x=>`<div class="item"><span>Týden od ${fmtDate(x.weekStart)} · ${x.days.filter(d=>d.recipeId).length} jídel</span><span><button class="btn ghost small" data-load="${x.id}">Otevřít</button> <button class="btn danger small" data-delp="${x.id}">Smazat</button></span></div>`).join('')}</div>`:''}`;
 
   const shift = n=>{ const m=new Date(p.weekStart); m.setDate(m.getDate()+7*n); const ex=plans.find(x=>x.weekStart===iso(m)); planDraft = ex?JSON.parse(JSON.stringify(ex)):newDraft(m); viewPlan(app); };
   $('#prevw').addEventListener('click',()=>shift(-1)); $('#nextw').addEventListener('click',()=>shift(1));
-  $$('.day select').forEach(s=>s.addEventListener('change',()=>{ p.days[s.dataset.i].recipeId=s.value||null; viewPlan(app); }));
+  $$('.day select').forEach(s=>s.addEventListener('change',()=>{
+    const d=p.days[s.dataset.i]; d.recipeId=s.value||null;
+    if(d.recipeId && !d.servings) d.servings = settings.get().planServings||2;
+    viewPlan(app);
+  }));
+  $$('[data-ds]').forEach(b=>b.addEventListener('click',()=>{
+    const d=p.days[b.dataset.day];
+    d.servings = Math.max(1, dayServings(d) + Number(b.dataset.ds));
+    viewPlan(app);
+  }));
   $('#rnd')?.addEventListener('click',()=>{
     const pool=[...mains].sort(()=>Math.random()-.5);
     if(!pool.length){ toast('Zatím nemáš žádný recept se štítkem „hlavní jídlo“.'); return; }
-    p.days.forEach((d,i)=>d.recipeId=pool[i%pool.length].id); viewPlan(app);
+    const def=settings.get().planServings||2;
+    p.days.forEach((d,i)=>{ d.recipeId=pool[i%pool.length].id; if(!d.servings) d.servings=def; });
+    viewPlan(app);
   });
   $('#ai')?.addEventListener('click',async e=>{
     busy(e.target,true,'Sestavuji…');
@@ -678,7 +795,8 @@ function viewPlan(app){
       const j = await Gemini.json(`Sestav týdenní jídelníček (${DAYS.join(', ')}) pouze z těchto hlavních jídel. Vrať JSON {"days":[{"day":"pondělí","recipeId":"…"}, …]} se sedmi položkami, id pouze ze seznamu. Střídej typy a kuchyně, neopakuj recept, pokud to není nutné. ${$('#wish').value.trim()?'Přání uživatele: '+$('#wish').value.trim():''}
 Recepty: ${JSON.stringify(list)}`);
       const ids=new Set(recipes.map(r=>r.id));
-      (j.days||[]).forEach(d=>{ const i=DAYS.indexOf((d.day||'').toLowerCase()); if(i>=0 && ids.has(d.recipeId)) p.days[i].recipeId=d.recipeId; });
+      const def=settings.get().planServings||2;
+      (j.days||[]).forEach(d=>{ const i=DAYS.indexOf((d.day||'').toLowerCase()); if(i>=0 && ids.has(d.recipeId)){ p.days[i].recipeId=d.recipeId; if(!p.days[i].servings) p.days[i].servings=def; } });
       viewPlan(app); toast('Návrh hotový, dolaď a ulož');
     }catch(err){ busy(e.target,false); toast(err.message); }
   });
@@ -690,25 +808,54 @@ Recepty: ${JSON.stringify(list)}`);
 /* ---------------- nákup ---------------- */
 function viewShop(app){
   const p = planDraft || plans[0];
+  const staples = stapleList();
   const items = new Map();
-  const used = p ? p.days.map(d=>recipes.find(r=>r.id===d.recipeId)).filter(Boolean) : [];
-  for(const r of used){ for(const i of r.ingredients){
-    const key=(i.name||i.raw).toLowerCase().trim()+'|'+(i.unit||'').toLowerCase();
-    const cur=items.get(key)||{name:i.name||i.raw,unit:i.unit,amount:0,hasAmount:false,uses:new Set()};
-    if(i.amount!=null){ cur.amount+=i.amount; cur.hasAmount=true; }
-    cur.uses.add(r.name); items.set(key,cur);
-  } }
-  const list=[...items.values()].sort((a,b)=>a.name.localeCompare(b.name,'cs'));
-  const line = it=>[it.hasAmount?fmtAmount(it.amount):'',it.unit,it.name].filter(Boolean).join(' ');
+  let skipped = new Set();
+  const used = [];
+  if(p) for(const d of p.days){
+    const r = recipes.find(x=>x.id===d.recipeId); if(!r) continue;
+    const want = dayServings(d), base = r.servings||1, factor = want/base;
+    used.push({name:r.name, servings:want});
+    for(const i of r.ingredients){
+      const name = (i.name||i.raw||'').trim();
+      if(!name) continue;
+      if(isStaple(name, staples)){ skipped.add(name.toLowerCase()); continue; }
+      const scaled = i.amount!=null ? i.amount*factor : null;
+      const b = toBase(scaled, i.unit);
+      const key = normName(name)+'|'+b.unit;
+      const cur = items.get(key) || {name, unit:b.unit, amount:0, hasAmount:false, uses:new Set()};
+      if(b.amount!=null){ cur.amount += b.amount; cur.hasAmount = true; }
+      cur.uses.add(r.name);
+      items.set(key, cur);
+    }
+  }
+  // zaškrtnuté položky patří na konec seznamu
+  const list = [...items.entries()].map(([key,it])=>({key, ...it}))
+    .sort((a,b)=>{
+      const da = state.shopDone.has(a.key)?1:0, db = state.shopDone.has(b.key)?1:0;
+      return da!==db ? da-db : a.name.localeCompare(b.name,'cs');
+    });
+  const shown = it=>{ const f = it.hasAmount ? fromBase(it.amount, it.unit) : {amount:null, unit:it.unit}; return [f.amount!=null?fmtAmount(f.amount):'', f.unit].filter(Boolean).join(' '); };
+  const line = it=>[shown(it), it.name].filter(Boolean).join(' ');
+  const totalPortions = used.reduce((a,x)=>a+x.servings,0);
+
   app.innerHTML = `
-    <div class="page-head"><div><h1>Nákup</h1><div class="sub">${p?`z jídelníčku od ${fmtDate(p.weekStart)} · ${used.length} jídel`:'žádný jídelníček'}</div></div>
+    <div class="page-head"><div><h1>Nákup</h1><div class="sub">${p?`z jídelníčku od ${fmtDate(p.weekStart)} · ${used.length} jídel · ${totalPortions} ${nameForm(totalPortions)}`:'žádný jídelníček'}</div></div>
       ${list.length?`<button class="btn" id="copy">Zkopírovat seznam</button>`:''}</div>
-    ${list.length?`<ul class="shop">${list.map((it,i)=>`<li data-i="${i}"><input type="checkbox" id="c${i}"><label for="c${i}" class="t" style="margin:0;font-weight:500">${esc(it.name)}<div class="shop-uses">${esc([...it.uses].join(', '))}</div></label><span class="amt">${esc([it.hasAmount?fmtAmount(it.amount):'',it.unit].filter(Boolean).join(' '))}</span></li>`).join('')}</ul>
-    <p class="hint" style="margin-top:1rem">Seznam se skládá z jídelníčku, který máš zrovna otevřený.</p>`
+    ${list.length?`<ul class="shop">${list.map((it,i)=>{
+        const done = state.shopDone.has(it.key);
+        return `<li class="${done?'done':''}"><input type="checkbox" id="c${i}" data-key="${esc(it.key)}" ${done?'checked':''}><label for="c${i}" class="t" style="margin:0;font-weight:500">${esc(it.name)}<div class="shop-uses">${esc([...it.uses].join(', '))}</div></label><span class="amt">${esc(shown(it))}</span></li>`;
+      }).join('')}</ul>
+    ${skipped.size?`<p class="hint" style="margin-top:1rem">Vynecháno jako běžná zásoba: ${esc([...skipped].join(', '))}. Seznam upravíš v Nastavení.</p>`:''}
+    <p class="hint" style="margin-top:.5rem">Počítáno podle porcí nastavených u jednotlivých dnů v jídelníčku.</p>`
     :`<div class="empty"><h3>Prázdný seznam</h3>Nejdřív sestav jídelníček. <a href="#/jidelnicek">Jídelníček</a></div>`}`;
-  $$('.shop li input').forEach(c=>c.addEventListener('change',()=>c.closest('li').classList.toggle('done',c.checked)));
+
+  $$('.shop li input').forEach(c=>c.addEventListener('change',()=>{
+    c.checked ? state.shopDone.add(c.dataset.key) : state.shopDone.delete(c.dataset.key);
+    viewShop(app);
+  }));
   $('#copy')?.addEventListener('click',async()=>{
-    const text = 'Nákupní seznam\n'+list.map(it=>'- '+line(it)).join('\n');
+    const text = 'Nákupní seznam\n'+list.filter(it=>!state.shopDone.has(it.key)).map(it=>'- '+line(it)).join('\n');
     try{ await navigator.clipboard.writeText(text); toast('Seznam zkopírován'); }catch{ prompt('Zkopíruj text:',text); }
   });
 }
@@ -728,7 +875,15 @@ function viewSettings(app){
       <label for="tm">Model <small>(přepis receptů z fotky, jídelníček)</small></label>
       <input type="text" id="tm" list="models" value="${esc(s.textModel)}">
       <datalist id="models"></datalist>
-      <p class="hint" style="margin-top:.75rem">Vyber Flash nebo Flash-Lite model – umí číst fotky i text a bývají v bezplatném tarifu. V nabídce jsou i modely, které seznam z Googlu nevrací; pokud u některého přijde chyba, zkus jiný.</p>
+      <p class="hint" style="margin-top:.75rem">Vyber Flash nebo Flash-Lite model – umí číst fotky i text. V nabídce jsou i modely, které seznam z Googlu nevrací; pokud u některého přijde chyba, zkus jiný.</p>
+    </div>
+    <div class="set-block">
+      <h3>Nákupní seznam</h3>
+      <label for="ps">Výchozí počet porcí na den</label>
+      <input type="number" id="ps" min="1" value="${s.planServings||2}" style="max-width:140px">
+      <label for="stp">Co nekupuji <small>– suroviny, které mám vždy doma; odděl čárkou</small></label>
+      <textarea id="stp" rows="3">${esc(s.staples)}</textarea>
+      <p class="hint" style="margin-top:.5rem">Piš i tvary, které se v receptech objevují („sůl“ i „soli“). Do nákupního seznamu se pak nedostanou.</p>
     </div>
     <div class="btn-row"><button class="btn" id="save">Uložit nastavení</button></div>
     <div class="set-block" style="margin-top:1.5rem">
@@ -739,7 +894,7 @@ function viewSettings(app){
       <div class="btn-row"><button class="btn secondary" id="exp">Stáhnout zálohu (JSON)</button><label class="btn ghost" for="impf" style="margin:0">Obnovit ze zálohy</label><input type="file" id="impf" accept="application/json" class="hidden"></div>
       <p class="hint" style="margin-top:.75rem">Obnova přidá recepty ze zálohy k těm stávajícím; stejné recepty (podle id) přepíše.</p>
     </div>`;
-  $('#save').addEventListener('click',()=>{ settings.set({apiKey:$('#key').value.trim(), textModel:$('#tm').value.trim()}); toast('Nastavení uloženo'); });
+  $('#save').addEventListener('click',()=>{ settings.set({apiKey:$('#key').value.trim(), textModel:$('#tm').value.trim(), planServings:Math.max(1,parseInt($('#ps').value)||2), staples:$('#stp').value.trim()}); toast('Nastavení uloženo'); });
   $('#test').addEventListener('click',async e=>{
     settings.set({apiKey:$('#key').value.trim()});
     busy(e.target,true,'Ověřuji…'); const st=$('#st');

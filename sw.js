@@ -1,5 +1,5 @@
 // Offline cache – při každé změně aplikace zvedni číslo verze.
-const VERSION = 'recepty-v7';
+const VERSION = 'recepty-v11';
 const CORE = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png', './icon-maskable-512.png'];
 
 self.addEventListener('install', e => {
@@ -11,8 +11,8 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
   if (e.request.method !== 'GET') return;
-  // API volání nikdy necachovat
-  if (url.hostname.endsWith('googleapis.com') && url.pathname.includes('/models')) return;
+  // Volání serverové části nikdy necachovat
+  if (url.pathname.includes('/api/')) return;
   // fonty: cache s doplněním ze sítě
   if (url.hostname.includes('fonts.g')) {
     e.respondWith(caches.open(VERSION).then(async c => {
